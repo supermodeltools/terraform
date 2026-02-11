@@ -1269,14 +1269,47 @@ func (m *Meta) backendFromConfig(opts *BackendOpts) (backend.Backend, tfdiags.Di
 			return savedStateStore, diags
 		}
 
-		// Above caters only for unchanged config
-		// but this switch case will also handle changes,
-		// which isn't implemented yet.
-		return nil, diags.Append(&hcl.Diagnostic{
-			Severity: hcl.DiagError,
-			Summary:  "Not implemented yet",
-			Detail:   "Changing a state store configuration is not implemented yet",
-		})
+		// If our configuration (the result of both the literal configuration and given
+		// -backend-config options) is the same, then we're just initializing a previously
+		// configured state store. The literal configuration may differ, however, so while we
+		// don't need to migrate, we update the state store cache hash value.
+		if !m.stateStoreConfigNeedsMigration(stateStoreConfig, s.StateStore) {
+			log.Printf("[TRACE] Meta.Backend: using already-initialized %q state store configuration", stateStoreConfig.Type)
+			savedStateStore, moreDiags := m.savedStateStore(sMgr)
+			diags = diags.Append(moreDiags)
+			if moreDiags.HasErrors() {
+				return nil, diags
+			}
+
+			// It's possible for a state store to be unchanged, and the config itself to
+			// have changed by moving a parameter from the config to `-backend-config`
+			// In this case, we update the Hash.
+			moreDiags = m.updateSavedStateStoreHash(cHash, sMgr)
+			if moreDiags.HasErrors() {
+				return nil, diags
+			}
+			// Verify that selected workspace exist. Otherwise prompt user to create one
+			if opts.Init && savedStateStore != nil {
+				if err := m.selectWorkspace(savedStateStore); err != nil {
+					diags = diags.Append(err)
+					return nil, diags
+				}
+			}
+
+			return savedStateStore, diags
+		}
+		log.Printf("[TRACE] Meta.Backend: state store configuration has changed (from type %q to type %q)", s.StateStore.Type, stateStoreConfig.Type)
+
+		if !opts.Init {
+			// user ran another cmd that is not init but they are required to initialize because of a potential relevant change to their state store configuration
+			initDiag := m.determineInitReason(s.StateStore.Type, stateStoreConfig.Type, cloud.ConfigChangeIrrelevant)
+			diags = diags.Append(initDiag)
+			return nil, diags
+		}
+
+		log.Printf("[WARN] state store config has changed since last init")
+
+		return m.stateStore_changed(opts)
 
 	default:
 		diags = diags.Append(fmt.Errorf(
@@ -1892,6 +1925,22 @@ func (m *Meta) updateSavedBackendHash(cHash int, sMgr *clistate.LocalState) tfdi
 	return diags
 }
 
+func (m *Meta) updateSavedStateStoreHash(cHash int, sMgr *clistate.LocalState) tfdiags.Diagnostics {
+	var diags tfdiags.Diagnostics
+
+	s := sMgr.State()
+
+	if s.StateStore.Hash != uint64(cHash) {
+		s.StateStore.Hash = uint64(cHash)
+		if err := sMgr.WriteState(s); err != nil {
+			diags = diags.Append(errStateStoreWriteSavedDiag(err))
+		}
+		// No need to call PersistState as it's a no-op
+	}
+
+	return diags
+}
+
 // backend returns an operations backend that may use a backend, cloud, or state_store block for state storage.
 // Based on the supplied config, it prepares arguments to pass into (Meta).Backend, which returns the operations backend.
 //
@@ -2435,6 +2484,142 @@ func (m *Meta) stateStore_to_backend(ssSMgr *clistate.LocalState, dstBackendType
 
 	// Return backend
 	return dstBackend, diags
+}
+
+func (m *Meta) stateStoreConfigNeedsMigration(cfg *configs.StateStore, cfgState *workdir.StateStoreConfigState) bool {
+	// TODO
+	return false
+}
+
+func (m *Meta) stateStore_changed(opts *BackendOpts) (backend.Backend, tfdiags.Diagnostics) {
+	var diags tfdiags.Diagnostics
+
+	vt := arguments.ViewJSON
+	// Set default viewtype if none was set as the StateLocker needs to know exactly
+	// what viewType we want to have.
+	if opts == nil || opts.ViewType != vt {
+		vt = arguments.ViewHuman
+	}
+
+	// TODO
+	diags = diags.Append(fmt.Errorf("NOT IMPLEMENTED YET"))
+	return nil, diags
+
+	// // Get the old state
+	// s := sMgr.State()
+
+	// cloudMode := cloud.DetectConfigChangeType(s.Backend, c, false)
+	// diags = diags.Append(m.assertSupportedCloudInitOptions(cloudMode))
+	// if diags.HasErrors() {
+	// 	return nil, diags
+	// }
+
+	// if output {
+	// 	// Notify the user
+	// 	view := views.NewInit(vt, m.View)
+	// 	switch cloudMode {
+	// 	case cloud.ConfigChangeInPlace:
+	// 		view.Output(views.BackendCloudChangeInPlaceMessage)
+	// 	case cloud.ConfigMigrationIn:
+	// 		view.Output(views.BackendMigrateToCloudMessage, s.Backend.Type)
+	// 	case cloud.ConfigMigrationOut:
+	// 		view.Output(views.BackendMigrateFromCloudMessage, c.Type)
+	// 	default:
+	// 		if s.Backend.Type != c.Type {
+	// 			view.Output(views.BackendMigrateTypeChangeMessage, s.Backend.Type, c.Type)
+	// 		} else {
+	// 			view.Output(views.BackendReconfigureMessage)
+	// 		}
+	// 	}
+	// }
+
+	// // Get the backend
+	// b, configVal, moreDiags := m.backendInitFromConfig(c)
+	// diags = diags.Append(moreDiags)
+	// if moreDiags.HasErrors() {
+	// 	return nil, diags
+	// }
+
+	// // If this is a migration into, out of, or irrelevant to HCP Terraform
+	// // mode then we will do state migration here. Otherwise, we just update
+	// // the working directory initialization directly, because HCP Terraform
+	// // doesn't have configurable state storage anyway -- we're only changing
+	// // which workspaces are relevant to this configuration, not where their
+	// // state lives.
+	// if cloudMode != cloud.ConfigChangeInPlace {
+	// 	// Grab the existing backend
+	// 	oldB, oldBDiags := m.savedBackend(sMgr)
+	// 	diags = diags.Append(oldBDiags)
+	// 	if oldBDiags.HasErrors() {
+	// 		return nil, diags
+	// 	}
+
+	// 	// Perform the migration
+	// 	err := m.backendMigrateState(&backendMigrateOpts{
+	// 		SourceType:      s.Backend.Type,
+	// 		DestinationType: c.Type,
+	// 		Source:          oldB,
+	// 		Destination:     b,
+	// 		ViewType:        vt,
+	// 	})
+	// 	if err != nil {
+	// 		diags = diags.Append(err)
+	// 		return nil, diags
+	// 	}
+
+	// 	if m.stateLock {
+	// 		view := views.NewStateLocker(vt, m.View)
+	// 		stateLocker := clistate.NewLocker(m.stateLockTimeout, view)
+	// 		if err := stateLocker.Lock(sMgr, "backend from plan"); err != nil {
+	// 			diags = diags.Append(fmt.Errorf("Error locking state: %s", err))
+	// 			return nil, diags
+	// 		}
+	// 		defer stateLocker.Unlock()
+	// 	}
+	// }
+
+	// // Update the backend state
+	// s = sMgr.State()
+	// if s == nil {
+	// 	s = workdir.NewBackendStateFile()
+	// }
+	// s.Backend = &workdir.BackendConfigState{
+	// 	Type: c.Type,
+	// 	Hash: uint64(cHash),
+	// }
+	// err := s.Backend.SetConfig(configVal, b.ConfigSchema())
+	// if err != nil {
+	// 	diags = diags.Append(fmt.Errorf("Can't serialize backend configuration as JSON: %s", err))
+	// 	return nil, diags
+	// }
+
+	// // Verify that selected workspace exist. Otherwise prompt user to create one
+	// if opts.Init && b != nil {
+	// 	if err := m.selectWorkspace(b); err != nil {
+	// 		diags = diags.Append(err)
+	// 		return b, diags
+	// 	}
+	// }
+
+	// if err := sMgr.WriteState(s); err != nil {
+	// 	diags = diags.Append(errBackendWriteSavedDiag(err))
+	// 	return nil, diags
+	// }
+	// if err := sMgr.PersistState(); err != nil {
+	// 	diags = diags.Append(errBackendWriteSavedDiag(err))
+	// 	return nil, diags
+	// }
+
+	// if output {
+	// 	// By now the backend is successfully configured.  If using HCP Terraform, the success
+	// 	// message is handled as part of the final init message
+	// 	if _, ok := b.(*cloud.Cloud); !ok {
+	// 		view := views.NewInit(vt, m.View)
+	// 		view.Output(views.BackendConfiguredSuccessMessage, s.Backend.Type)
+	// 	}
+	// }
+
+	// return b, diags
 }
 
 // getStateStorageProviderVersion gets the current version of the state store provider that's in use. This is achieved

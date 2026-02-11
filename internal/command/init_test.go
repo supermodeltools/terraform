@@ -5641,6 +5641,80 @@ func TestInit_cloud_to_stateStore(t *testing.T) {
 	}
 }
 
+func TestInit_stateStoreConfigFileChange(t *testing.T) {
+	// Create a temporary working directory and copy in test fixtures
+	td := t.TempDir()
+	testCopyDir(t, testFixturePath("init-state-store"), td)
+	t.Chdir(td)
+
+	mockProvider := mockPluggableStateStorageProvider()
+	mockProviderAddress := addrs.NewDefaultProvider("test")
+	providerSource, close := newMockProviderSource(t, map[string][]string{
+		"hashicorp/test": {"1.2.3"},
+	})
+	defer close()
+
+	tOverrides := &testingOverrides{
+		Providers: map[addrs.Provider]providers.Factory{
+			mockProviderAddress: providers.FactoryFixed(mockProvider),
+		},
+	}
+
+	{
+		ui := new(cli.MockUi)
+		view, done := testView(t)
+		c := &InitCommand{
+			Meta: Meta{
+				testingOverrides:          tOverrides,
+				ProviderSource:            providerSource,
+				Ui:                        ui,
+				View:                      view,
+				AllowExperimentalFeatures: true,
+			},
+		}
+
+		args := []string{
+			"-enable-pluggable-state-storage-experiment",
+		}
+		if code := c.Run(args); code != 0 {
+			t.Fatalf("bad: \n%s", done(t).Stderr())
+		}
+
+		// Read our saved stateStore config and verify we have our settings
+		state := testDataStateRead(t, filepath.Join(DefaultDataDir, DefaultStateFilename))
+		if got, want := normalizeJSON(t, state.StateStore.ConfigRaw), `{"value":"foobar"}`; got != want {
+			t.Errorf("wrong config\ngot:  %s\nwant: %s", got, want)
+		}
+	}
+	{
+		ui := new(cli.MockUi)
+		view, done := testView(t)
+		c := &InitCommand{
+			Meta: Meta{
+				testingOverrides:          tOverrides,
+				ProviderSource:            providerSource,
+				Ui:                        ui,
+				View:                      view,
+				AllowExperimentalFeatures: true,
+			},
+		}
+		args := []string{
+			"-enable-pluggable-state-storage-experiment",
+			"-backend-config", "input.tfbackend.hcl",
+			"-migrate-state",
+		}
+		if code := c.Run(args); code != 0 {
+			t.Fatalf("bad: \n%s", done(t).Stderr())
+		}
+
+		// Read our saved state store config and verify we have our settings
+		state := testDataStateRead(t, filepath.Join(DefaultDataDir, DefaultStateFilename))
+		if got, want := normalizeJSON(t, state.StateStore.ConfigRaw), `{"value":"changed"}`; got != want {
+			t.Errorf("wrong config\ngot:  %s\nwant: %s", got, want)
+		}
+	}
+}
+
 // newMockProviderSource is a helper to succinctly construct a mock provider
 // source that contains a set of packages matching the given provider versions
 // that are available for installation (from temporary local files).
