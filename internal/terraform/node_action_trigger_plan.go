@@ -58,7 +58,7 @@ func (n *nodeActionTriggerPlanExpand) DynamicExpand(ctx EvalContext) (*Graph, tf
 				addr:             actionAddr,
 				config:           n.Config,
 				resolvedProvider: n.resolvedProvider,
-				lifecycleActionTrigger: &lifecycleActionTriggerPartialExpanded{
+				resourceActionTrigger: &resourceActionTriggerPartialExpanded{
 					resourceAddress:         resourceAddr,
 					events:                  n.triggerConfig.events,
 					actionTriggerBlockIndex: n.triggerConfig.actionTriggerBlockIndex,

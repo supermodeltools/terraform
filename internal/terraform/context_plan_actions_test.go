@@ -100,13 +100,12 @@ func TestContextPlan_actions(t *testing.T) {
 	}
 
 	for topic, tcs := range map[string]map[string]struct {
-		toBeImplemented bool
-		module          map[string]string
-		buildState      func(*states.SyncState)
-		planActionFn    func(*testing.T, providers.PlanActionRequest) providers.PlanActionResponse
-		planResourceFn  func(*testing.T, providers.PlanResourceChangeRequest) providers.PlanResourceChangeResponse
-		readResourceFn  func(*testing.T, providers.ReadResourceRequest) providers.ReadResourceResponse
-		planOpts        *PlanOpts
+		module         map[string]string
+		buildState     func(*states.SyncState)
+		planActionFn   func(*testing.T, providers.PlanActionRequest) providers.PlanActionResponse
+		planResourceFn func(*testing.T, providers.PlanResourceChangeRequest) providers.PlanResourceChangeResponse
+		readResourceFn func(*testing.T, providers.ReadResourceRequest) providers.ReadResourceResponse
+		planOpts       *PlanOpts
 
 		expectPlanActionCalled bool
 
